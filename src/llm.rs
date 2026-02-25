@@ -18,7 +18,7 @@ struct Answer {
     message: Message,
 }
 
-pub async fn generate_commit_message(diff: String) -> anyhow::Result<String> {
+pub async fn generate_commit_message(diff: String, temp: f32) -> anyhow::Result<String> {
     let prompt = include_str!("instructions.txt");
     let messages = vec![
         Message {
@@ -34,7 +34,7 @@ pub async fn generate_commit_message(diff: String) -> anyhow::Result<String> {
     let request = Request {
         model: "llama3.2".to_string(),
         messages: messages,
-        temperature: 0.0,
+        temperature: temp,
         stream: false,
     };
     let client = reqwest::Client::new();
