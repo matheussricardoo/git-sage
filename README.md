@@ -3,32 +3,32 @@
 <img width="100%" src="https://capsule-render.vercel.app/api?type=waving&color=222222&height=200&section=header&text=git-sage&fontSize=55&fontColor=fff&animation=twinkling&fontAlignY=40&desc=AI-powered%20Git%20Commit%20Generator%20%7C%20Rust%20%7C%20Ollama&descAlignY=60&descSize=18">
 
 <p align="center">
-  <i>🦀 A CLI tool that uses a local LLM via Ollama to automatically generate Conventional Commit messages from your staged git diffs.</i>
+  <i>A CLI tool that uses a local LLM via Ollama to automatically generate Conventional Commit messages from your staged git diffs.</i>
 </p>
 
 ---
 
-### 🌟 Features
+### Features
 
 <div align="center">
 
-| Feature | Description |
-|:---:|:---|
-| 🤖 | Local LLM — no API key, runs fully offline |
-| ⚡ | GPU-accelerated inference via Ollama |
-| 📝 | Follows the Conventional Commits specification |
-| 🔀 | Split mode — one commit per file with `-s` |
-| ✏️ | Interactive prompt — accept, edit or skip each suggestion |
-| 🔒 | Lock file auto-included in the first accepted commit |
-| 🎨 | Colored output for quick visual scanning |
-| ⏳ | Spinner feedback while the model is generating |
-| ⚠️ | Diff truncation warning with suggested `--ctx` value |
+| Feature |
+|:---|
+| Local LLM — no API key, runs fully offline |
+| GPU-accelerated inference via Ollama |
+| Follows the Conventional Commits specification |
+| Split mode — one commit per file with `-s` |
+| Interactive prompt — accept, edit or skip each suggestion |
+| Lock file auto-included in the first accepted commit |
+| Colored output for quick visual scanning |
+| Spinner feedback while the model is generating |
+| Diff truncation warning with suggested `--ctx` value |
 
 </div>
 
 ---
 
-### 🛠️ Technologies
+### Technologies
 
 <div align="center">
   <a href="https://skillicons.dev">
@@ -42,7 +42,7 @@
 
 ---
 
-### 🚀 Getting Started
+### Getting Started
 
 #### 1. Install Ollama
 
@@ -72,7 +72,7 @@ cargo install --path .
 
 ---
 
-### 💻 Usage
+### Usage
 
 ```bash
 # Stage your files first
@@ -120,12 +120,12 @@ Suggestion: feat(main): add --push flag and colored output
 When a diff exceeds the context window, a warning is shown with a suggested fix:
 
 ```
-⚠ Diff truncated (6000/12400 bytes). Use --ctx 4133 for full analysis.
+Diff truncated (6000/12400 bytes). Use --ctx 4133 for full analysis.
 ```
 
 ---
 
-### 📁 Structure
+### Structure
 
 ```
 src/
@@ -137,7 +137,7 @@ src/
 
 ---
 
-### 🤖 Model Configuration
+### Model Configuration
 
 All model parameters are controlled via CLI flags — no need to edit source code or recompile.
 
@@ -163,7 +163,7 @@ ollama pull llama3.2:3b
 
 ---
 
-### ⚙️ CLI Flags
+### CLI Flags
 
 All parameters have sensible defaults tuned for a **GTX 1050 Ti (4GB VRAM) + i5-7400 + 8GB RAM** setup.
 
@@ -179,7 +179,7 @@ All parameters have sensible defaults tuned for a **GTX 1050 Ti (4GB VRAM) + i5-
 
 ---
 
-### 🔒 Lock File Support
+### Lock File Support
 
 git-sage automatically detects staged lock files and attaches them to the first accepted commit. No manual handling needed. Supported lock files:
 
@@ -198,14 +198,14 @@ git-sage automatically detects staged lock files and attaches them to the first 
 
 ---
 
-### 🧠 Model Selection Guide
+### Model Selection Guide
 
 Choose based on your available VRAM:
 
 | VRAM | Recommended Model | Notes |
 |:---:|:---|:---|
 | 2 GB | `qwen2.5-coder:1.5b` | Fast, lower accuracy |
-| 4 GB | `qwen2.5-coder:3b` ✅ | Best quality/speed ratio for 4 GB cards |
+| 4 GB | `qwen2.5-coder:3b` | Best quality/speed ratio for 4 GB cards |
 | 6 GB | `qwen2.5-coder:7b` | Noticeably better descriptions |
 | 8 GB+ | `deepseek-coder:6.7b` | High quality output |
 | CPU only | `qwen2.5-coder:1.5b` | Use `--gpu 0`, expect slower inference |
@@ -241,7 +241,7 @@ ollama ps
 
 ---
 
-### 👤 Author
+### Author
 
 <div align="center">
   <a href="https://github.com/matheussricardoo" target="_blank">
