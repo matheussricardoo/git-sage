@@ -1,6 +1,5 @@
-use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::io::Write;
 
 #[derive(Serialize, Deserialize)]
 struct Message {
@@ -25,9 +24,22 @@ struct Request {
     stream: bool,
 }
 
+#[derive(Deserialize, Default)]
+struct StreamMessage {
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    thinking: String,
+}
+
 #[derive(Deserialize)]
-struct Answer {
-    message: Message,
+struct StreamAnswer {
+    #[serde(default)]
+    message: StreamMessage,
+    #[serde(default)]
+    done: bool,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 pub struct LlmConfig {
@@ -97,17 +109,8 @@ pub async fn generate_commit_message(
             num_gpu: config.num_gpu,
             num_thread: config.num_thread,
         },
-        stream: false,
+        stream: true,
     };
-
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::default_spinner()
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-            .template("{spinner:.cyan} Generating commit message...")
-            .unwrap(),
-    );
-    spinner.enable_steady_tick(Duration::from_millis(80));
 
     let client = reqwest::Client::new();
     let response = client
@@ -116,7 +119,6 @@ pub async fn generate_commit_message(
         .send()
         .await
         .map_err(|e| {
-            spinner.finish_and_clear();
             if e.is_connect() {
                 anyhow::anyhow!(
                     "Could not connect to Ollama at http://localhost:11434\n  \
@@ -127,11 +129,73 @@ pub async fn generate_commit_message(
             }
         })?;
 
-    let answer: Answer = response.json().await?;
-    spinner.finish_and_clear();
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        let details = body.trim();
+        if details.is_empty() {
+            return Err(anyhow::anyhow!("Ollama returned an error: HTTP {}", status));
+        }
+        return Err(anyhow::anyhow!(
+            "Ollama returned an error: HTTP {} - {}",
+            status,
+            details
+        ));
+    }
+
+    let mut response = response;
+
+    let mut streamed_message = String::new();
+    let mut pending = Vec::<u8>::new();
+    let mut hinted_generation = false;
+
+    // Parse NDJSON lines and print each token immediately
+    while let Some(chunk) = response.chunk().await? {
+        pending.extend_from_slice(&chunk);
+
+        while let Some(pos) = pending.iter().position(|b| *b == b'\n') {
+            let mut line = pending.drain(..=pos).collect::<Vec<u8>>();
+
+            // Remove line endings
+            if matches!(line.last(), Some(b'\n')) {
+                line.pop();
+            }
+            if matches!(line.last(), Some(b'\r')) {
+                line.pop();
+            }
+            if line.is_empty() {
+                continue;
+            }
+
+            let text = std::str::from_utf8(&line)
+                .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in stream: {}", e))?;
+            let answer: StreamAnswer = serde_json::from_str(text)
+                .map_err(|e| anyhow::anyhow!("Invalid JSON in stream: {}", e))?;
+
+            if let Some(error) = answer.error {
+                return Err(anyhow::anyhow!("Ollama stream error: {}", error));
+            }
+
+            if !answer.message.content.is_empty() {
+                print!("{}", answer.message.content);
+                std::io::stdout().flush()?;
+                streamed_message.push_str(&answer.message.content);
+            } else if !answer.message.thinking.is_empty() && !hinted_generation {
+                // On models that emit long reasoning first, print a minimal hint
+                // so the terminal never appears frozen.
+                print!("...");
+                std::io::stdout().flush()?;
+                hinted_generation = true;
+            }
+
+            if answer.done {
+                break;
+            }
+        }
+    }
 
     Ok(CommitResult {
-        message: answer.message.content.trim().to_string(),
+        message: streamed_message.trim().to_string(),
         truncated,
         original_bytes,
         used_bytes,
