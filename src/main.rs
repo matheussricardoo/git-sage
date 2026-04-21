@@ -2,6 +2,7 @@ use crate::llm::{LlmConfig, generate_commit_message};
 use clap::Parser;
 use inquire::{Select, Text};
 use owo_colors::OwoColorize;
+use std::io::{self, Write};
 use std::path::Path;
 use tokio::process::Command;
 
@@ -144,7 +145,10 @@ async fn main() -> anyhow::Result<()> {
                 .and_then(|s| s.to_str())
                 .unwrap_or(&filename);
 
+            print!("Suggestion: ");
+            io::stdout().flush()?;
             let result = generate_commit_message(diff, Some(stem), &config).await?;
+            println!("\n");
 
             if result.truncated {
                 println!(
@@ -155,8 +159,6 @@ async fn main() -> anyhow::Result<()> {
                     format!("--ctx {}", result.original_bytes / 3).cyan()
                 );
             }
-
-            println!("Suggestion: {}\n", result.message.green());
 
             let locks_to_attach = if lock_pending {
                 lock_files.clone()
@@ -177,7 +179,10 @@ async fn main() -> anyhow::Result<()> {
         }
     } else {
         let diff = git::get_staged_diff()?;
+        print!("General Suggestion: ");
+        io::stdout().flush()?;
         let result = generate_commit_message(diff, None, &config).await?;
+        println!("\n");
 
         if result.truncated {
             println!(
@@ -189,7 +194,6 @@ async fn main() -> anyhow::Result<()> {
             );
         }
 
-        println!("General Suggestion: {}\n", result.message.green());
         let committed = commit_workflow(result.message, None, &[]).await?;
         if committed && args.push {
             git_push().await?;

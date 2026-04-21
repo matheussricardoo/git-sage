@@ -21,7 +21,7 @@
 | Interactive prompt — accept, edit or skip each suggestion |
 | Lock file auto-included in the first accepted commit |
 | Colored output for quick visual scanning |
-| Spinner feedback while the model is generating |
+| Real-time token streaming while the model is generating |
 | Diff truncation warning with suggested `--ctx` value |
 
 </div>
