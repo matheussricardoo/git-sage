@@ -1,257 +1,64 @@
-<div align="center">
+# git-sage
 
-<img width="100%" src="https://capsule-render.vercel.app/api?type=waving&color=222222&height=200&section=header&text=git-sage&fontSize=55&fontColor=fff&animation=twinkling&fontAlignY=40&desc=AI-powered%20Git%20Commit%20Generator%20%7C%20Rust%20%7C%20Ollama&descAlignY=60&descSize=18">
+Rust command-line tool that generates commit-message suggestions from staged Git diffs using a local Ollama model. The user can accept, edit or skip suggestions. This is a development utility, not a hosted AI service.
 
-<p align="center">
-  <i>A CLI tool that uses a local LLM via Ollama to automatically generate Conventional Commit messages from your staged git diffs.</i>
-</p>
+## Implemented
 
----
+- Clap command-line arguments and interactive review.
+- Local HTTP streaming through Reqwest/Tokio, with NDJSON parsing.
+- Single-commit mode or one commit per staged file with `--split`.
+- Detection of common dependency lock files, attached to the first accepted split commit.
+- UTF-8-safe diff truncation and explicit failures for incomplete/empty model output.
+- Optional interactive push confirmation when `--push` is supplied.
 
-### Features
+## Run locally
 
-<div align="center">
-
-| Feature |
-|:---|
-| Local LLM — no API key, runs fully offline |
-| GPU-accelerated inference via Ollama |
-| Follows the Conventional Commits specification |
-| Split mode — one commit per file with `-s` |
-| Interactive prompt — accept, edit or skip each suggestion |
-| Lock file auto-included in the first accepted commit |
-| Colored output for quick visual scanning |
-| Real-time token streaming while the model is generating |
-| Diff truncation warning with suggested `--ctx` value |
-
-</div>
-
----
-
-### Technologies
-
-<div align="center">
-  <a href="https://skillicons.dev">
-    <img src="https://skillicons.dev/icons?i=rust,linux&theme=dark" />
-  </a>
-</div>
-
-<div align="center">
-  <sub>Tokio • Reqwest • Clap • Inquire • Serde • Indicatif • owo-colors • Ollama</sub>
-</div>
-
----
-
-### Getting Started
-
-#### 1. Install Ollama
-
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
-
-#### 2. Pull the model
-
-```bash
-ollama pull qwen2.5-coder:3b
-```
-
-#### 3. Clone & build
+Requires Rust, Git, Ollama and a downloaded model. Initial package/model downloads need network access; generation uses localhost:11434. No paid API key is required. Hardware requirements depend on the selected model and are not benchmarked by this repository.
 
 ```bash
 git clone https://github.com/matheussricardoo/git-sage.git
 cd git-sage
-cargo build --release
+cargo build --release --locked
+ollama pull qwen2.5-coder:3b
 ```
 
-#### 4. (Optional) Install globally
+Start Ollama separately. From a repository containing staged changes, run the built binary or install it explicitly with `cargo install --path . --locked`.
 
 ```bash
-cargo install --path .
+git add path/to/file
+git-sage                 # review a single suggested commit
+git-sage --split         # review each file separately
+git-sage --gpu 0         # CPU inference
+git-sage --ctx 4096      # change the context estimate
+git-sage --help
 ```
 
----
+| Option | Default | Purpose |
+|---|---|---|
+| --model | qwen2.5-coder:3b | Local Ollama model |
+| --threads | 4 | Inference thread setting |
+| --gpu | 99 | GPU layer setting; 0 requests CPU |
+| --ctx | 2048 | Context setting and diff-size estimate |
+| --temp | 0.0 | Model temperature |
+| --split | false | One commit per staged non-lock file |
+| --push | false | Offer interactive Git push after commits |
 
-### Usage
+## Validation
 
 ```bash
-# Stage your files first
-git add .
-
-# Generate a single commit for all staged files
-git-sage
-
-# Generate one commit per file (split mode)
-git-sage -s
-
-# Prompt to push after all commits are done
-git-sage -s --push
-
-# Use a different model
-git-sage -s --model qwen2.5-coder:7b
-
-# Adjust model creativity (0.0 = deterministic, 1.0 = creative)
-git-sage -s --temp 0.2
-
-# Increase context window for large diffs
-git-sage -s --ctx 4096
-
-# Run fully on CPU (no GPU)
-git-sage --gpu 0 --threads 8
+cargo test --locked
 ```
 
-#### Interactive prompt
+Four unit tests cover UTF-8 truncation and stream parsing. Two integration tests use temporary Git repositories to verify that split mode rejects unstaged changes and staged renames without calling a model. No push or model inference occurs in these tests.
 
-For each suggestion you can choose:
+## Limitations and decisions
 
-```
---- src/main.rs
-⠋ Generating commit message...
-Suggestion: feat(main): add --push flag and colored output
+Git uses NUL-delimited filenames. Split mode refuses files whose working-tree content differs from staged content because a pathspec commit can otherwise include changes outside the analyzed staged diff. Staged renames are refused in split mode; use single-commit mode to keep a rename atomic. Avoid editing files concurrently with a commit.
 
-> Commit this file?
-  Yes    ← commit as-is
-  No     ← skip this file
-  Edit   ← open the message for editing before committing
-```
+The byte/context ratio is an estimate and does not account precisely for prompt overhead or model tokenization. Large diffs can still exceed a model's context. Generated messages require review; output is not guaranteed to describe every change accurately.
 
-#### Truncation warning
+Only the local Ollama endpoint is used for generation. Git push contacts the configured remote only after the optional interactive confirmation. Local inference, GPU behavior and a full interactive session were not exercised during the portfolio review.
 
-When a diff exceeds the context window, a warning is shown with a suggested fix:
+## Author and license
 
-```
-Diff truncated (6000/12400 bytes). Use --ctx 4133 for full analysis.
-```
-
----
-
-### Structure
-
-```
-src/
-├── main.rs           # CLI args, commit workflow, split logic, colored output
-├── llm.rs            # Ollama API client, spinner, truncation logic
-├── git.rs            # Git diff helpers, generic lock file detection
-└── instructions.txt  # System prompt for the LLM
-```
-
----
-
-### Model Configuration
-
-All model parameters are controlled via CLI flags — no need to edit source code or recompile.
-
-```bash
-git-sage --model <MODEL> --threads <N> --gpu <N> --ctx <N> --temp <F>
-```
-
-To see all available models locally:
-
-```bash
-ollama list
-```
-
-To pull a different model:
-
-```bash
-ollama pull <model-name>
-# Examples:
-ollama pull qwen2.5-coder:7b
-ollama pull deepseek-coder:6.7b
-ollama pull llama3.2:3b
-```
-
----
-
-### CLI Flags
-
-All parameters have sensible defaults tuned for a **GTX 1050 Ti (4GB VRAM) + i5-7400 + 8GB RAM** setup.
-
-| Flag | Default | Description |
-|:---|:---:|:---|
-| `-s, --split` | `false` | Generate one commit per staged file |
-| `-t, --temp` | `0.0` | Model temperature (`0.0` = deterministic, `1.0` = creative) |
-| `--model` | `qwen2.5-coder:3b` | Ollama model to use |
-| `--threads` | `4` | CPU threads (set to your core count) |
-| `--gpu` | `99` | GPU layers to offload (`99` = all, `0` = CPU only) |
-| `--ctx` | `2048` | Context window in tokens (increase for large diffs) |
-| `--push` | `false` | Prompt to push commits to remote after finishing |
-
----
-
-### Lock File Support
-
-git-sage automatically detects staged lock files and attaches them to the first accepted commit. No manual handling needed. Supported lock files:
-
-| Language | Lock File |
-|:---|:---|
-| Rust | `Cargo.lock` |
-| Node (npm) | `package-lock.json` |
-| Node (yarn) | `yarn.lock` |
-| Node (pnpm) | `pnpm-lock.yaml` |
-| Python (poetry) | `poetry.lock` |
-| Python (pipenv) | `Pipfile.lock` |
-| Ruby | `Gemfile.lock` |
-| Go | `go.sum` |
-| PHP | `composer.lock` |
-| Nix | `flake.lock` |
-
----
-
-### Model Selection Guide
-
-Choose based on your available VRAM:
-
-| VRAM | Recommended Model | Notes |
-|:---:|:---|:---|
-| 2 GB | `qwen2.5-coder:1.5b` | Fast, lower accuracy |
-| 4 GB | `qwen2.5-coder:3b` | Best quality/speed ratio for 4 GB cards |
-| 6 GB | `qwen2.5-coder:7b` | Noticeably better descriptions |
-| 8 GB+ | `deepseek-coder:6.7b` | High quality output |
-| CPU only | `qwen2.5-coder:1.5b` | Use `--gpu 0`, expect slower inference |
-
-> The default `qwen2.5-coder:3b` in Q4 quantization uses ~1.9 GB of VRAM and fits entirely on a 4 GB card.
-
-#### Checking your specs
-
-**GPU VRAM (Linux):**
-
-```bash
-nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
-```
-
-**CPU core count:**
-
-```bash
-nproc
-```
-
-**RAM:**
-
-```bash
-free -h
-```
-
-**Check if Ollama is using your GPU:**
-
-```bash
-ollama ps
-# The "Processor" column shows GPU % vs CPU %
-```
-
----
-
-### Author
-
-<div align="center">
-  <a href="https://github.com/matheussricardoo" target="_blank">
-    <img src="https://skillicons.dev/icons?i=github" alt="GitHub"/>
-  </a>
-  <a href="https://www.linkedin.com/in/matheus-ricardo-426452266/" target="_blank">
-    <img src="https://skillicons.dev/icons?i=linkedin" alt="LinkedIn"/>
-  </a>
-</div>
-
-<img width="100%" src="https://capsule-render.vercel.app/api?type=waving&color=222222&height=120&section=footer"/>
-
-</div>
+[Matheus Ricardo](https://github.com/matheussricardoo) · [LinkedIn](https://www.linkedin.com/in/matheussricardoo/). See [LICENSE](LICENSE).

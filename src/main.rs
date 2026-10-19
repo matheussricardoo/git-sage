@@ -133,6 +133,9 @@ async fn main() -> anyhow::Result<()> {
     if args.split {
         // detect staged lock files generically so this works outside Rust projects too
         let lock_files = git::get_staged_lock_files()?;
+        let mut checked_files = files.clone();
+        checked_files.extend(lock_files.clone());
+        git::ensure_no_unstaged_changes(&checked_files)?;
         let mut lock_pending = !lock_files.is_empty();
         let mut any_committed = false;
 

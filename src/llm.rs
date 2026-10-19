@@ -28,8 +28,6 @@ struct Request {
 struct StreamMessage {
     #[serde(default)]
     content: String,
-    #[serde(default)]
-    thinking: String,
 }
 
 #[derive(Deserialize)]
@@ -62,19 +60,10 @@ pub async fn generate_commit_message(
     filename: Option<&str>,
     config: &LlmConfig,
 ) -> anyhow::Result<CommitResult> {
-    let max_diff_bytes = (config.num_ctx * 3) as usize; // ~3 bytes per token as a safe estimate
+    let max_diff_bytes = (config.num_ctx as usize).saturating_mul(3); // ~3 bytes per token as a safe estimate
     let original_bytes = diff.len();
 
-    let (diff, truncated) = if diff.len() > max_diff_bytes {
-        // truncate at the last newline before the limit
-        // to avoid sending a malformed partial line to the model
-        let boundary = diff[..max_diff_bytes]
-            .rfind('\n')
-            .unwrap_or(max_diff_bytes);
-        (&diff[..boundary], true)
-    } else {
-        (diff.as_str(), false)
-    };
+    let (diff, truncated) = truncate_diff(&diff, max_diff_bytes);
 
     let used_bytes = diff.len();
     let prompt = include_str!("instructions.txt");
@@ -147,57 +136,99 @@ pub async fn generate_commit_message(
 
     let mut streamed_message = String::new();
     let mut pending = Vec::<u8>::new();
-    let mut hinted_generation = false;
-
-    // Parse NDJSON lines and print each token immediately
-    while let Some(chunk) = response.chunk().await? {
+    let mut done = false;
+    'stream: while let Some(chunk) = response.chunk().await? {
         pending.extend_from_slice(&chunk);
-
         while let Some(pos) = pending.iter().position(|b| *b == b'\n') {
-            let mut line = pending.drain(..=pos).collect::<Vec<u8>>();
-
-            // Remove line endings
-            if matches!(line.last(), Some(b'\n')) {
-                line.pop();
-            }
-            if matches!(line.last(), Some(b'\r')) {
-                line.pop();
-            }
-            if line.is_empty() {
-                continue;
-            }
-
-            let text = std::str::from_utf8(&line)
-                .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in stream: {}", e))?;
-            let answer: StreamAnswer = serde_json::from_str(text)
-                .map_err(|e| anyhow::anyhow!("Invalid JSON in stream: {}", e))?;
-
-            if let Some(error) = answer.error {
-                return Err(anyhow::anyhow!("Ollama stream error: {}", error));
-            }
-
-            if !answer.message.content.is_empty() {
-                print!("{}", answer.message.content);
-                std::io::stdout().flush()?;
-                streamed_message.push_str(&answer.message.content);
-            } else if !answer.message.thinking.is_empty() && !hinted_generation {
-                // On models that emit long reasoning first, print a minimal hint
-                // so the terminal never appears frozen.
-                print!("...");
-                std::io::stdout().flush()?;
-                hinted_generation = true;
-            }
-
-            if answer.done {
-                break;
+            let line = pending.drain(..=pos).collect::<Vec<u8>>();
+            let (token, finished) = parse_line(&line)?;
+            print!("{}", token);
+            std::io::stdout().flush()?;
+            streamed_message.push_str(&token);
+            if finished {
+                done = true;
+                break 'stream;
             }
         }
     }
-
+    if !done && !pending.is_empty() {
+        let (token, finished) = parse_line(&pending)?;
+        print!("{}", token);
+        std::io::stdout().flush()?;
+        streamed_message.push_str(&token);
+        done = finished;
+    }
+    anyhow::ensure!(
+        done,
+        "Ollama stream ended before completion; no commit was created"
+    );
+    anyhow::ensure!(
+        !streamed_message.trim().is_empty(),
+        "Ollama returned an empty message"
+    );
     Ok(CommitResult {
         message: streamed_message.trim().to_string(),
         truncated,
         original_bytes,
         used_bytes,
     })
+}
+
+fn truncate_diff(diff: &str, max_bytes: usize) -> (&str, bool) {
+    if diff.len() <= max_bytes {
+        return (diff, false);
+    }
+    let mut end = max_bytes;
+    while !diff.is_char_boundary(end) {
+        end -= 1;
+    }
+    let end = diff[..end].rfind('\n').unwrap_or(end);
+    (&diff[..end], true)
+}
+
+fn parse_line(line: &[u8]) -> anyhow::Result<(String, bool)> {
+    if line.iter().all(u8::is_ascii_whitespace) {
+        return Ok((String::new(), false));
+    }
+    let answer: StreamAnswer = serde_json::from_slice(line)?;
+    if let Some(error) = answer.error {
+        anyhow::bail!("Ollama stream error: {}", error);
+    }
+    Ok((answer.message.content, answer.done))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncation_preserves_utf8_at_every_boundary() {
+        let diff = "é🙂 change";
+        for limit in 0..diff.len() {
+            let (text, truncated) = truncate_diff(diff, limit);
+            assert!(truncated);
+            assert!(text.len() <= limit);
+            assert!(diff.starts_with(text));
+        }
+        assert_eq!(truncate_diff(diff, diff.len()), (diff, false));
+    }
+
+    #[test]
+    fn truncation_prefers_complete_lines() {
+        assert_eq!(truncate_diff("first\nsecond line", 10), ("first", true));
+    }
+
+    #[test]
+    fn parses_final_line_without_newline() {
+        assert_eq!(
+            parse_line(br#"{"message":{"content":"fix: test"},"done":true}"#).unwrap(),
+            ("fix: test".to_string(), true)
+        );
+    }
+
+    #[test]
+    fn rejects_upstream_error_and_invalid_json() {
+        assert!(parse_line(br#"{"error":"missing model"}"#).is_err());
+        assert!(parse_line(b"invalid").is_err());
+    }
 }

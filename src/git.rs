@@ -46,7 +46,7 @@ pub fn get_staged_diff() -> anyhow::Result<String> {
 
 pub fn get_staged_diff_name_only() -> anyhow::Result<Vec<String>> {
     let output = Command::new("git")
-        .args(["diff", "--staged", "--name-only"])
+        .args(["diff", "--staged", "--name-only", "-z"])
         .output()?;
 
     if !output.status.success() {
@@ -55,8 +55,8 @@ pub fn get_staged_diff_name_only() -> anyhow::Result<Vec<String>> {
     }
     let output_str = String::from_utf8(output.stdout)?;
     let files = output_str
-        .lines()
-        .filter(|line| !is_lock_file(line))
+        .split('\0')
+        .filter(|line| !line.is_empty() && !is_lock_file(line))
         .map(|s| s.to_string())
         .collect();
 
@@ -78,7 +78,7 @@ pub fn get_staged_diff_for_file(filename: &str) -> anyhow::Result<String> {
 /// Returns the list of lock files that are currently staged.
 pub fn get_staged_lock_files() -> anyhow::Result<Vec<String>> {
     let output = Command::new("git")
-        .args(["diff", "--staged", "--name-only"])
+        .args(["diff", "--staged", "--name-only", "-z"])
         .output()?;
 
     if !output.status.success() {
@@ -87,10 +87,33 @@ pub fn get_staged_lock_files() -> anyhow::Result<Vec<String>> {
     }
     let output_str = String::from_utf8(output.stdout)?;
     let locks = output_str
-        .lines()
-        .filter(|line| is_lock_file(line))
+        .split('\0')
+        .filter(|line| !line.is_empty() && is_lock_file(line))
         .map(|s| s.to_string())
         .collect();
 
     Ok(locks)
+}
+
+/// A pathspec commit includes working-tree content. Refuse split mode when it
+/// would commit changes that were not included in the staged diff sent to Ollama.
+pub fn ensure_no_unstaged_changes(files: &[String]) -> anyhow::Result<()> {
+    let renames = Command::new("git")
+        .args(["diff", "--cached", "--name-only", "--diff-filter=R", "-z"])
+        .output()?;
+    if !renames.status.success() || !renames.stdout.is_empty() {
+        bail!("Split mode does not support staged renames; use single-commit mode.");
+    }
+    for file in files {
+        let status = Command::new("git")
+            .args(["diff", "--quiet", "--", file])
+            .status()?;
+        if !status.success() {
+            bail!(
+                "Split mode requires staged and working-tree content to match: {}. Stage all changes to this path or use single-commit mode.",
+                file
+            );
+        }
+    }
+    Ok(())
 }
